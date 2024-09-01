@@ -1,22 +1,43 @@
 """Convenience aggregator for all submodules
 """
 
+import importlib.metadata
+from subprocess import CalledProcessError, TimeoutExpired  # noqa: F401
+
+from pshell.call import call as call
+from pshell.call import check_call as check_call
+from pshell.call import check_output as check_output
+from pshell.call import real_fh as real_fh
+from pshell.env import override_env as override_env
+from pshell.env import putenv as putenv
+from pshell.env import resolve_env as resolve_env
+from pshell.env import source as source
+from pshell.file import backup as backup
+from pshell.file import chdir as chdir
+from pshell.file import copy as copy
+from pshell.file import exists as exists
+from pshell.file import lexists as lexists
+from pshell.file import mkdir as mkdir
+from pshell.file import move as move
+from pshell.file import owner as owner
+from pshell.file import pushd as pushd
+from pshell.file import remove as remove
+from pshell.file import symlink as symlink
+from pshell.log import context_logger as context_logger
+from pshell.log import get_logger as get_logger
+from pshell.log import set_global_logger as set_global_logger
+from pshell.manipulate import concatenate as concatenate
+from pshell.open import pshell_open as open  # noqa: F401
+from pshell.procs import find_procs_by_cmdline as find_procs_by_cmdline
+from pshell.procs import kill as kill
+from pshell.procs import killall as killall
+from pshell.procs import wait_for_server as wait_for_server
+from pshell.search import FileMatchError as FileMatchError
+from pshell.search import glob as glob
+from pshell.search import iglob as iglob
+
 try:
-    from .version import version as __version__  # noqa: F401
-except ImportError:  # pragma: no cover
-    raise ImportError('pshell not properly installed. If you are running'
-                      ' from the source directory, please instead '
-                      'create a new virtual environment (using conda or '
-                      'virtualenv) and then install it in-place by running: '
-                      'pip install -e .')
-
-
-from subprocess import CalledProcessError, TimeoutExpired   # noqa: F401
-from .call import call, check_call, check_output, real_fh  # noqa: F401
-from .env import source, putenv, override_env, resolve_env  # noqa: F401
-from .file import remove, chdir, pushd, move, copy, backup   # noqa: F401
-from .file import symlink, exists, lexists, mkdir, owner  # noqa: F401
-from .manipulate import concatenate  # noqa: F401
-from .open import pshell_open as open  # noqa: F401
-from .procs import find_procs_by_cmdline, kill, killall  # noqa: F401
-from .search import FileMatchError, glob, iglob  # noqa: F401
+    __version__ = importlib.metadata.version("pshell")
+except importlib.metadata.PackageNotFoundError:  # pragma: nocover
+    # Local copy, not installed with pip
+    __version__ = "999"

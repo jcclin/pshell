@@ -1,31 +1,52 @@
 """Functions for handling files and directories
 """
+from __future__ import annotations
+
 import datetime
 import errno
-import logging
 import os
 import shutil
 import stat
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from .env import resolve_env
+from pathlib import Path
+from typing import Literal, overload
+
+from pshell import log
+from pshell.env import resolve_env
+
+__all__ = (
+    "remove",
+    "chdir",
+    "pushd",
+    "move",
+    "copy",
+    "backup",
+    "symlink",
+    "exists",
+    "lexists",
+    "mkdir",
+    "owner",
+)
 
 
-__all__ = ('remove', 'chdir', 'pushd', 'move', 'copy', 'backup', 'symlink',
-           'exists', 'lexists', 'mkdir', 'owner')
+def _unix_only() -> None:
+    """Crash if running on Windows"""
+    if os.name == "nt":
+        raise OSError("Not supported on Windows")  # pragma: nocover
 
 
-def _unix_only():
-    """Crash if running on Windows
-    """
-    if os.name == 'nt':
-        raise EnvironmentError("Not supported on Windows")
-
-
-def remove(path, *, recursive=False, force=True, ignore_readonly=False,
-           rename_on_fail=False):
+def remove(
+    path: str | Path,
+    *,
+    recursive: bool = False,
+    force: bool = True,
+    ignore_readonly: bool = False,
+    rename_on_fail: bool = False,
+) -> None:
     """Remove file or directory
 
-    :param str path:
+    :param path:
         Target file or directory
     :param bool recursive:
         If True, recursively delete tree starting at path
@@ -48,7 +69,7 @@ def remove(path, *, recursive=False, force=True, ignore_readonly=False,
     """
     realpath = resolve_env(path)
 
-    logging.info("Deleting %s", path)
+    log.info("Deleting %s", path)
     try:
         if os.path.islink(realpath):
             os.remove(realpath)
@@ -59,7 +80,7 @@ def remove(path, *, recursive=False, force=True, ignore_readonly=False,
                 # something do chmod u+w on the failed path and continue
                 has_errors = False
 
-                def onerror(function, path, excinfo):
+                def onerror(function: object, path: str, excinfo: object) -> None:
                     # Do not act only on PermissionError.
                     # It could also be OSError('Directory not empty').
                     nonlocal has_errors
@@ -68,8 +89,9 @@ def remove(path, *, recursive=False, force=True, ignore_readonly=False,
                         # chmod u+w
                         mode = os.stat(path).st_mode
                         os.chmod(path, mode | stat.S_IWUSR)
-                    except OSError:
+                    except OSError:  # pragma: nocover
                         pass
+
                 shutil.rmtree(realpath, onerror=onerror)
 
                 # If there were any errors on the first round, perform a second
@@ -94,26 +116,24 @@ def remove(path, *, recursive=False, force=True, ignore_readonly=False,
             # Note: this is different than testing for existence and then
             # deleting, as it prevents race conditions when the same path is
             # being deleted from multiple scripts in parallel.
-            logging.info("%s", e)
+            log.info("%s", e)
         elif rename_on_fail and e.errno != errno.ENOENT:
-            logging.warning("%s", e)
+            log.warning("%s", e)
             timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-            backup(path, suffix='DELETEME.' + timestamp, action='move')
+            backup(path, suffix="DELETEME." + timestamp, action="move")
         else:
             raise
 
 
-def chdir(path):
-    """Move the present-working directory (pwd) into the target directory.
-    """
-    if path == '':
-        path = '.'
-    logging.info("chdir %s", path)
+def chdir(path: str | Path) -> None:
+    """Move the present-working directory (pwd) into the target directory."""
+    path = Path(path)
+    log.info("chdir %s", path)
     os.chdir(resolve_env(path))
 
 
 @contextmanager
-def pushd(path):
+def pushd(path: str | Path) -> Iterator[None]:
     """Context manager that moves the pwd into target directory. When leaving
     the context, the pwd is changed back to what it originally was.
 
@@ -128,31 +148,29 @@ def pushd(path):
         ...
         popd
     """
-    if path == '':
-        path = '.'
-
+    path = Path(path)
     cwd = os.getcwd()
-    logging.info("pushd %s", path)
+    log.info("pushd %s", path)
     os.chdir(resolve_env(path))
     try:
         yield
     finally:
-        logging.info("popd")
+        log.info("popd")
         os.chdir(cwd)
 
 
-def move(src, dst):
+def move(src: str | Path, dst: str | Path) -> None:
     """Recursively move a file or directory (src) to another location (dst).
     If the destination is a directory or a symlink to a directory, then src is
     moved inside that directory. The destination directory must not already
     exist. If the destination already exists but is not a directory, it may be
     overwritten depending on :func:`os.rename` semantics.
     """
-    logging.info("Moving %s to %s", src, dst)
-    shutil.move(resolve_env(src), resolve_env(dst))
+    log.info("Moving %s to %s", src, dst)
+    shutil.move(resolve_env(str(src)), resolve_env(str(dst)))
 
 
-def copy(src, dst, *, ignore=None):
+def copy(src: str | Path, dst: str | Path, *, ignore: Callable | None = None) -> None:
     """Recursively copy a file or directory. If src is a regular file and dst
     is a directory, a file with the same basename as src is created (or
     overwritten) in the directory specified. Permission bits and last modified
@@ -182,7 +200,7 @@ def copy(src, dst, *, ignore=None):
     :param ignore:
         Only effective when copying a directory. See :func:`shutil.copytree`.
     """
-    logging.info("Copying %s to %s", src, dst)
+    log.info("Copying %s to %s", src, dst)
     src = resolve_env(src)
     dst = resolve_env(dst)
     if os.path.isdir(src):
@@ -193,10 +211,40 @@ def copy(src, dst, *, ignore=None):
         shutil.copy2(src, dst)
 
 
-def backup(path, *, suffix=None, force=False, action='copy'):
+@overload
+def backup(
+    path: str,
+    *,
+    suffix: str | None = None,
+    force: bool = False,
+    action: Literal["copy", "move"] = "copy",
+) -> str | None:
+    ...
+
+
+@overload
+def backup(
+    path: Path,
+    *,
+    suffix: str | None = None,
+    force: bool = False,
+    action: Literal["copy", "move"] = "copy",
+) -> Path | None:
+    ...
+
+
+def backup(
+    path: str | Path,
+    *,
+    suffix: str | None = None,
+    force: bool = False,
+    action: Literal["copy", "move"] = "copy",
+) -> str | Path | None:
     """Recursively copy or move a file of directory from <path> to
     <path>.<suffix>.
 
+    :param path:
+        File or directory to back up. Can be a string or a :class:`pathlib.Path`.
     :param str suffix:
         suffix for the backup file. Default: .YYYYMMDD-HHMMSS
     :param bool force:
@@ -206,36 +254,40 @@ def backup(path, *, suffix=None, force=False, action='copy'):
     :raise FileNotFoundError:
         if path does not exist and force=False
     :returns:
-        renamed path, or None if no backup was performed
+        renamed path, or None if no backup was performed.
+        If path is a :class:`~pathlib.Path`, then the return value is also a
+        :class:`~pathlib.Path`.
     """
-    assert action in ('copy', 'move')
+    assert action in ("copy", "move")
 
     if force and not os.path.lexists(resolve_env(path)):
         # Do nothing
-        logging.info("%s does not exist, skipping backup", path)
+        log.info("%s does not exist, skipping backup", path)
         return None
 
     if suffix is None:
         suffix = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 
-    path_bak = "%s.%s" % (path, suffix)
+    path_bak = f"{path}.{suffix}"
 
     # In case of collision, call the subsequent backups as .2, .3, etc.
     i = 2
     while os.path.lexists(resolve_env(path_bak)):
-        logging.info("%s already exists, generating a unique name")
-        path_bak = "%s.%s.%d" % (path, suffix, i)
+        log.info("%s already exists, generating a unique name")
+        path_bak = f"{path}.{suffix}.{i}"
         i += 1
 
-    if action == 'copy':
+    if action == "copy":
         copy(path, path_bak)
     else:
         move(path, path_bak)
 
-    return path_bak
+    return type(path)(path_bak)
 
 
-def symlink(src, dst, *, force=False, abspath=False):
+def symlink(
+    src: str | Path, dst: str | Path, *, force: bool = False, abspath: bool = False
+) -> None:
     """Create a symbolic link pointing to src named dst.
 
     This exclusively works in Unix, on POSIX-compatible filesystems.
@@ -272,11 +324,11 @@ def symlink(src, dst, *, force=False, abspath=False):
     real_dst = os.path.abspath(resolve_env(dst))
     if force and os.path.islink(real_dst):
         if os.path.abspath(os.path.realpath(real_dst)) == real_src:
-            logging.info("Symlink %s => %s already exists", src, dst)
+            log.info("Symlink %s => %s already exists", src, dst)
             return
         remove(dst)
 
-    logging.info("Creating symlink %s => %s", src, dst)
+    log.info("Creating symlink %s => %s", src, dst)
 
     if abspath:
         os.symlink(real_src, real_dst)
@@ -292,37 +344,37 @@ def symlink(src, dst, *, force=False, abspath=False):
             os.chdir(cwd_backup)
 
 
-def exists(path):
+def exists(path: str | Path) -> bool:
     """Wrapper around :func:`os.path.exists`, with automated resolution of
     environment variables and logging.
     """
     respath = resolve_env(path)
     if os.path.exists(respath):
-        logging.debug("File exists: %s", path)
+        log.debug("File exists: %s", path)
         return True
-    logging.debug("File does not exist or is a broken symlink: %s", path)
+    log.debug("File does not exist or is a broken symlink: %s", path)
     return False
 
 
-def lexists(path):
+def lexists(path: str | Path) -> bool:
     """Wrapper around :func:`os.path.lexists`, with automated resolution of
     environment variables and logging.
     """
     respath = resolve_env(path)
     if os.path.lexists(respath):
-        logging.debug("File exists: %s", path)
+        log.debug("File exists: %s", path)
         return True
-    logging.debug("File does not exist: %s", path)
+    log.debug("File does not exist: %s", path)
     return False
 
 
-def mkdir(path, *, parents=True, force=True):
+def mkdir(path: str | Path, *, parents: bool = True, force: bool = True) -> None:
     """Create target directory.
 
     This function is safe for use in concurrent environments, where multiple
     actors try to simultaneously create the same directory.
 
-    :param str path:
+    :param path:
         directory to be created
     :param bool parents:
         if True, also create parent directories if necessary.
@@ -331,7 +383,7 @@ def mkdir(path, *, parents=True, force=True):
     """
     respath = resolve_env(path)
 
-    logging.info("Creating directory %s", path)
+    log.info("Creating directory %s", path)
     try:
         if parents:
             os.makedirs(respath)
@@ -341,12 +393,12 @@ def mkdir(path, *, parents=True, force=True):
         # Cannot rely on checking for EEXIST, since the operating system
         # could give priority to other errors like EACCES or EROFS
         if force and os.path.isdir(respath):
-            logging.info("Directory %s already exists", path)
+            log.info("Directory %s already exists", path)
         else:
             raise
 
 
-def owner(fname):
+def owner(fname: str | Path) -> str:
     """Return the username of the user owning a file.
 
     This function is not available on Windows.

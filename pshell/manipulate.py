@@ -1,20 +1,30 @@
 """Functions for manipulating files
 """
-import logging
-from .open import pshell_open
+from __future__ import annotations
+
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Any
+
+from pshell import log
+from pshell.open import pshell_open
+
+__all__ = ("concatenate",)
 
 
-__all__ = ('concatenate', )
-
-
-def concatenate(input_fnames, output_fname, mode='w', **kwargs):
+def concatenate(
+    input_fnames: Sequence[str | Path],
+    output_fname: str | Path,
+    mode: str = "w",
+    **kwargs: Any,
+) -> None:
     """Concatenate files. Python equivalent of
     :command:`cat input_fnames[0] input_fnames[1] ... > output_fname`.
 
     :param input_fnames:
         sequence of str. Paths to one or more input text files, to be appended
         one after the other to the output.
-    :param str output_fname:
+    :param output_fname:
         Path to output text file, which may or may not already exist.
     :param str mode:
         Mode for opening the output file e.g. 'w' or 'ab'.
@@ -31,56 +41,64 @@ def concatenate(input_fnames, output_fname, mode='w', **kwargs):
     in binary mode, the inputs will too; no extra bytes will be added between
     files.
     """
-    logging.info("Appending files: %s to: %s", input_fnames, output_fname)
+    log.info("Appending files: %s to: %s", input_fnames, output_fname)
 
-    if 'b' in mode:
+    if "b" in mode:
         _concatenate_binary(input_fnames, output_fname, mode, **kwargs)
     else:
         _concatenate_text(input_fnames, output_fname, mode, **kwargs)
 
 
-def _concatenate_binary(input_fnames, output_fname, mode, **kwargs):
-    """Implementation of concatenate for binary files
-    """
+def _concatenate_binary(
+    input_fnames: Sequence[str | Path],
+    output_fname: str | Path,
+    mode: str,
+    **kwargs: Any,
+) -> None:
+    """Implementation of concatenate for binary files"""
     with pshell_open(output_fname, mode, **kwargs) as ofh:
         for fname in input_fnames:
-            with pshell_open(fname, 'rb', **kwargs) as ifh:
-                for chunk in iter(lambda: ifh.read(65536), b''):
+            with pshell_open(fname, "rb", **kwargs) as ifh:
+                for chunk in iter(lambda: ifh.read(65536), b""):
                     ofh.write(chunk)
 
 
-def _concatenate_text(input_fnames, output_fname, mode, **kwargs):
-    """Implementation of concatenate for text files
-    """
+def _concatenate_text(
+    input_fnames: Sequence[str | Path],
+    output_fname: str | Path,
+    mode: str,
+    **kwargs: Any,
+) -> None:
+    """Implementation of concatenate for text files"""
     prepend_newline = False
-    if 'a' in mode:
+    if "a" in mode:
         # Check if the last line of the first file ends with a \n
         try:
             # Discard from kwargs all parameters that are only applicable
             # to text mode
             kwargs_peek = kwargs.copy()
-            kwargs_peek.pop('newline', None)
-            kwargs_peek.pop('encoding', None)
-            kwargs_peek.pop('errors', None)
+            kwargs_peek.pop("newline", None)
+            kwargs_peek.pop("encoding", None)
+            kwargs_peek.pop("errors", None)
 
-            with pshell_open(output_fname, 'rb', **kwargs_peek) as fh:
+            with pshell_open(output_fname, "rb", **kwargs_peek) as fh:
                 # Read last character
                 fh.seek(-1, 2)
                 # Won't work with \r terminator, which nobody cares about
                 # anyway. We really only care about \n (Unix and MacOSX)
                 # and \r\n (Windows).
-                prepend_newline = fh.read() != b'\n'
+                prepend_newline = fh.read() != b"\n"
         except FileNotFoundError as e:
-            logging.info("%s", e)
+            log.info("%s", e)
         except OSError:
             # Empty file
-            logging.info("Empty file: %s", output_fname)
+            log.info("Empty file: %s", output_fname)
 
     with pshell_open(output_fname, mode, **kwargs) as ofh:
         if prepend_newline:
-            ofh.write('\n')
+            ofh.write("\n")
         for fname in input_fnames:
-            with pshell_open(fname, 'r', **kwargs) as ifh:
+            with pshell_open(fname, "r", **kwargs) as ifh:
                 for line in ifh:
-                    ofh.write(line.rstrip('\r\n'))
-                    ofh.write('\n')
+                    ofh.write(line.rstrip("\r\n"))
+                    ofh.write("\n")

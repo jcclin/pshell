@@ -1,16 +1,21 @@
 """Functions related to environment variables
 """
-import logging
+from __future__ import annotations
+
 import os
 import string
+from collections.abc import Iterator
 from contextlib import contextmanager
-from .call import check_output
+from pathlib import Path
+from typing import IO, overload
+
+from pshell import log
+from pshell.call import check_output
+
+__all__ = ("source", "putenv", "override_env", "resolve_env")
 
 
-__all__ = ('source', 'putenv', 'override_env', 'resolve_env')
-
-
-def source(bash_file, *, stderr=None):
+def source(bash_file: str | Path, *, stderr: IO | None = None) -> None:
     """Emulate the bash command ``source <bash_file>``.
     The stdout of the command, if any, will be redirected to stderr.
     The acquired variables are injected into ``os.environment`` and are
@@ -24,7 +29,7 @@ def source(bash_file, *, stderr=None):
 
         The script is run with errexit, pipefail, nounset.
 
-    :param str bash_file:
+    :param bash_file:
         Path to the bash file. It can contain environment variables.
     :param stderr:
         standard error file handle. Omit for sys.stderr.
@@ -34,19 +39,19 @@ def source(bash_file, *, stderr=None):
     :raise CalledProcessError:
         if the command returns with non-zero exit status
     """
-    logging.info("Sourcing environment variables from %s", bash_file)
+    log.info("Sourcing environment variables from %s", bash_file)
 
-    stdout = check_output('source "%s" 1>&2 && env' % bash_file, stderr=stderr)
+    stdout = check_output(f'source "{bash_file}" 1>&2 && env', stderr=stderr)
 
     for line in stdout.splitlines():
         (key, _, value) = line.partition("=")
 
-        if key not in ('_', '', 'SHLVL') and os.getenv(key) != value:
-            logging.debug("Setting environment variable: %s=%s", key, value)
+        if key not in ("_", "", "SHLVL") and os.getenv(key) != value:
+            log.debug("Setting environment variable: %s=%s", key, value)
             os.environ[key] = value
 
 
-def putenv(key, value):
+def putenv(key: str, value: str | Path | None) -> None:
     """Set environment variable. The new variable will be visible to the
     current process and all subprocesses forked from it.
 
@@ -58,18 +63,19 @@ def putenv(key, value):
     :param value:
         Variable value. String to set a value, or None to delete the variable.
         It can be a reference other variables, e.g. ``${FOO}.${BAR}``.
+        :class:`~pathlib.Path` objects are transparently converted to strings.
     """
     if value is None:
-        logging.info("Deleting environment variable %s", key)
+        log.info("Deleting environment variable %s", key)
         os.environ.pop(key, None)
     else:
-        logging.info("Setting environment variable %s=%s", key, value)
+        log.info("Setting environment variable %s=%s", key, value)
         # Do NOT use os.putenv() - see python documentation
-        os.environ[key] = resolve_env(value)
+        os.environ[key] = resolve_env(str(value))
 
 
 @contextmanager
-def override_env(key, value):
+def override_env(key: str, value: str | Path | None) -> Iterator[None]:
     """Context manager that overrides an environment variable, returns control,
     and then restores it to its original value (or deletes it if it did not
     exist before).
@@ -79,6 +85,7 @@ def override_env(key, value):
     :param value:
         Variable value. String to set a value, or None to delete the variable.
         It can be a reference other variables, e.g. ``${FOO}.${BAR}``.
+        :class:`~pathlib.Path` objects are transparently converted to strings.
 
     Example::
 
@@ -99,24 +106,35 @@ def override_env(key, value):
         putenv(key, orig)
 
 
-def resolve_env(s):
-    """Resolve all environment variables in target string.
+@overload
+def resolve_env(s: str) -> str:
+    ...
+
+
+@overload
+def resolve_env(s: Path) -> Path:
+    ...
+
+
+def resolve_env(s: str | Path) -> str | Path:
+    """Resolve all environment variables in target string or :class:`~pathlib.Path`.
 
     This command always uses the bash syntax ``$VARIABLE`` or ``${VARIABLE}``.
     This also applies in Windows. Windows native syntax ``%VARIABLE%`` is not
     supported.
 
-    Unlike in :func:`os.path.expandpath`, undefined variables raise an
+    Unlike in :func:`os.path.expandvars`, undefined variables raise an
     exception instead of being silently replaced by an empty string.
 
-    :param str s:
-        string potentially containing environment variables
+    :param s:
+        string or :class:`~pathlib.Path` potentially containing environment variables
     :returns:
-        resolved string
+        resolved string, or :class:`~pathlib.Path` if the input is a
+        :class:`~pathlib.Path`
     :raise EnvironmentError:
         in case of missing environment variable
     """
     try:
-        return string.Template(s).substitute(os.environ)
+        return type(s)(string.Template(str(s)).substitute(os.environ))
     except KeyError as e:
-        raise EnvironmentError("Environment variable %s not found" % e)
+        raise OSError(f"Environment variable {e} not found") from None

@@ -28,6 +28,8 @@ Some of the core features:
   You're safe from the dreaded ``rm -rf $MISSPELLED/*``!
 - Functions from the core library are wrapped, hardened, polished, and
   occasionally changed to have a saner default behaviour.
+- Full :mod:`pathlib` support, also when wrapping standard library functions
+  that do not support it, such as :mod:`shutil` and :mod:`glob`.
 
 
 Quick start
@@ -52,6 +54,7 @@ Index
 .. toctree::
 
    installing
+   develop
    whats-new
 
 
@@ -63,6 +66,7 @@ API Reference
    api/call
    api/env
    api/file
+   api/log
    api/manipulate
    api/open
    api/procs
